@@ -23,26 +23,16 @@
 package kcp
 
 import (
-	"sync/atomic"
-
 	"github.com/pkg/errors"
 )
 
 // defaultReadLoop is the standard procedure for reading from a connection
-func (s *UDPSession) defaultReadLoop() {
+func (s *UDPSession) readLoop() {
 	buf := make([]byte, mtuLimit)
-	var src string
 	for {
-		if n, addr, err := s.conn.ReadFrom(buf); err == nil {
+		if n, _, _, err := s.conn.Read(buf, []byte{}); err == nil {
 			if s.isClosed() {
 				return
-			}
-			// make sure the packet is from the same source
-			if src == "" { // set source address
-				src = addr.String()
-			} else if addr.String() != src {
-				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-				continue
 			}
 			s.packetInput(buf[:n])
 		} else {
@@ -53,14 +43,22 @@ func (s *UDPSession) defaultReadLoop() {
 }
 
 // defaultReadLoop is the standard procedure for reading and accepting connections on a listener
-func (l *Listener) defaultMonitor() {
-	buf := make([]byte, mtuLimit)
+func (l *Listener) monitor() {
 	for {
-		if n, from, err := l.conn.ReadFrom(buf); err == nil {
-			l.packetInput(buf[:n], from)
-		} else {
+		conn, err := l.conn.Accept()
+		if err != nil {
 			l.notifyReadError(errors.WithStack(err))
 			return
 		}
+		go func() {
+			buf := make([]byte, mtuLimit)
+			for {
+				if err := l.packetInput(buf, conn); err != nil {
+					_ = conn.Close()
+					l.notifyReadError(errors.WithStack(err))
+					return
+				}
+			}
+		}()
 	}
 }

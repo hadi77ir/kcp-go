@@ -26,22 +26,22 @@ import (
 	"sync/atomic"
 
 	"github.com/pkg/errors"
-	"golang.org/x/net/ipv4"
+
+	UT "github.com/hadi77ir/go-udp/types"
 )
 
 // defaultTx is the default procedure to transmit data
-func (s *UDPSession) defaultTx(txqueue []ipv4.Message) {
-	nbytes := 0
-	npkts := 0
-	for k := range txqueue {
-		if n, err := s.conn.WriteTo(txqueue[k].Buffers[0], txqueue[k].Addr); err == nil {
-			nbytes += n
-			npkts++
-		} else {
+func (s *UDPSession) tx(tx [][]byte) {
+	dataN := 0
+	pktN := 0
+	for _, pkt := range tx {
+		if n, _, err := s.conn.Write(pkt, []byte{}, 0, UT.ECNUnsupported); err != nil {
 			s.notifyWriteError(errors.WithStack(err))
-			break
+		} else {
+			pktN++
+			dataN += n
 		}
 	}
-	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
-	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
+	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(pktN))
+	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(dataN))
 }

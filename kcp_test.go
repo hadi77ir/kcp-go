@@ -30,6 +30,10 @@ import (
 	"time"
 
 	"github.com/xtaci/lossyconn"
+
+	U "github.com/hadi77ir/go-udp"
+	UR "github.com/hadi77ir/go-udp/raw"
+	UT "github.com/hadi77ir/go-udp/types"
 )
 
 const repeat = 16
@@ -94,10 +98,34 @@ func TestLossyConn4(t *testing.T) {
 	testlink(t, client, server, 1, 10, 2, 0)
 }
 
+func wrapLossy(client *lossyconn.LossyConn, server *lossyconn.LossyConn) (UT.PacketConn, UT.SuperConn, error) {
+	rawClient, err := UR.WrapConn(client, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	rawServer, err := UR.WrapConn(server, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	pClient, err := U.WrapUnconnectedConn(rawClient, rawServer.LocalAddr(), nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	pServer, err := U.WrapListenConn(rawServer, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pClient, pServer, nil
+}
+
 func testlink(t *testing.T, client *lossyconn.LossyConn, server *lossyconn.LossyConn, nodelay, interval, resend, nc int) {
 	t.Log("testing with nodelay parameters:", nodelay, interval, resend, nc)
-	sess, _ := NewConn2(server.LocalAddr(), nil, 0, 0, client)
-	listener, _ := ServeConn(nil, 0, 0, server)
+	pClient, pServer, err := wrapLossy(client, server)
+	if err != nil {
+		panic(err)
+	}
+	sess, _ := NewConn2(server.LocalAddr(), nil, 0, 0, pClient)
+	listener, _ := ServeConn(nil, 0, 0, pServer)
 	echoServer := func(l *Listener) {
 		for {
 			conn, err := l.AcceptKCP()

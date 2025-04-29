@@ -39,6 +39,9 @@ import (
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/pbkdf2"
+
+	U "github.com/hadi77ir/go-udp"
+	UT "github.com/hadi77ir/go-udp/types"
 )
 
 var baseport = uint32(10000)
@@ -586,8 +589,23 @@ func TestListenerClose(t *testing.T) {
 }
 
 // A wrapper for net.PacketConn that remembers when Close has been called.
+type closedFlagSuperConn struct {
+	UT.SuperConn
+	Closed bool
+}
+
+func (c *closedFlagSuperConn) Close() error {
+	c.Closed = true
+	return c.SuperConn.Close()
+}
+
+func newClosedFlagSuperConn(c UT.SuperConn) *closedFlagSuperConn {
+	return &closedFlagSuperConn{c, false}
+}
+
+// A wrapper for net.PacketConn that remembers when Close has been called.
 type closedFlagPacketConn struct {
-	net.PacketConn
+	UT.PacketConn
 	Closed bool
 }
 
@@ -596,7 +614,7 @@ func (c *closedFlagPacketConn) Close() error {
 	return c.PacketConn.Close()
 }
 
-func newClosedFlagPacketConn(c net.PacketConn) *closedFlagPacketConn {
+func newClosedFlagPacketConn(c UT.PacketConn) *closedFlagPacketConn {
 	return &closedFlagPacketConn{c, false}
 }
 
@@ -604,13 +622,17 @@ func newClosedFlagPacketConn(c net.PacketConn) *closedFlagPacketConn {
 // https://github.com/xtaci/kcp-go/issues/165
 func TestListenerNonOwnedPacketConn(t *testing.T) {
 	// Create a net.PacketConn not owned by the Listener.
-	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	c, err := U.Listen("udp", addr)
 	if err != nil {
 		panic(err)
 	}
 	defer c.Close()
 	// Make it remember when it has been closed.
-	pconn := newClosedFlagPacketConn(c)
+	pconn := newClosedFlagSuperConn(c)
 
 	l, err := ServeConn(nil, 0, 0, pconn)
 	if err != nil {
@@ -635,11 +657,15 @@ func TestListenerNonOwnedPacketConn(t *testing.T) {
 // UDPSession should not close a net.PacketConn that it did not create.
 // https://github.com/xtaci/kcp-go/issues/165
 func TestUDPSessionNonOwnedPacketConn(t *testing.T) {
-	l := sinkServer(0)
+	l := sinkServer(17890)
 	defer l.Close()
 
 	// Create a net.PacketConn not owned by the UDPSession.
-	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:17890")
+	if err != nil {
+		panic(err)
+	}
+	c, err := U.Dial("udp", nil, addr)
 	if err != nil {
 		panic(err)
 	}
@@ -705,7 +731,7 @@ func TestControl(t *testing.T) {
 	}
 
 	errorA := errors.New("A")
-	err = l.Control(func(conn net.PacketConn) error {
+	err = l.Control(func(conn UT.SuperConn) error {
 		fmt.Printf("Listener Control: conn: %v\n", conn)
 		return errorA
 	})
@@ -720,7 +746,7 @@ func TestControl(t *testing.T) {
 	}
 
 	errorB := errors.New("B")
-	err = cli.Control(func(conn net.PacketConn) error {
+	err = cli.Control(func(conn UT.PacketConn) error {
 		fmt.Printf("Client Control: conn: %v\n", conn)
 		return errorB
 	})
@@ -731,8 +757,16 @@ func TestControl(t *testing.T) {
 }
 
 func TestSessionReadAfterClosed(t *testing.T) {
-	us, _ := net.ListenPacket("udp", "127.0.0.1:0")
-	uc, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	addrS, err := net.ResolveUDPAddr("udp", "127.0.0.1:15678")
+	if err != nil {
+		panic(err)
+	}
+	addrC, err := net.ResolveUDPAddr("udp", "127.0.0.1:15679")
+	if err != nil {
+		panic(err)
+	}
+	us, _ := U.Dial("udp", addrS, addrC)
+	uc, _ := U.Dial("udp", addrC, addrS)
 	defer us.Close()
 	defer uc.Close()
 
